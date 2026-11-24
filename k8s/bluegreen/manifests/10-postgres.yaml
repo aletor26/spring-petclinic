@@ -1,0 +1,63 @@
+# PostgreSQL compartido por blue y green.
+# El PVC (volumeClaimTemplates) guarda los datos en un disco que sobrevive a reinicios.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: petclinic-db
+  namespace: petclinic
+type: Opaque
+stringData:
+  POSTGRES_DB: petclinic
+  POSTGRES_USER: petclinic
+  POSTGRES_PASSWORD: petclinic
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: petclinic-db
+  namespace: petclinic
+spec:
+  selector:
+    app: petclinic-db
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: petclinic-db
+  namespace: petclinic
+spec:
+  serviceName: petclinic-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: petclinic-db
+  template:
+    metadata:
+      labels:
+        app: petclinic-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18.4
+          envFrom:
+            - secretRef:
+                name: petclinic-db
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "petclinic", "-d", "petclinic"]
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
