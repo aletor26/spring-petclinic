@@ -1,0 +1,46 @@
+# Validación ANTES de pasar el tráfico a la versión nueva (prePromotionAnalysis).
+# Si alguna métrica falla, Argo aborta y el tráfico sigue en la versión estable.
+#
+# Hoy: smoke tests (la app responde 200 en sus páginas clave).
+# Integración con el analizador AIOps (otro equipo): agregar una métrica "web"
+# que llame a su API y apruebe solo si el puntaje >= 75. Ejemplo:
+#
+#   - name: aiops-score
+#     provider:
+#       web:
+#         url: "http://aiops-analyzer.aiops.svc/verdict?preview={{args.preview-hash}}&stable={{args.stable-hash}}"
+#         jsonPath: "{$.score}"
+#     successCondition: result >= 75
+#
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: smoke-tests
+  namespace: petclinic
+spec:
+  args:
+    - name: service
+  metrics:
+    - name: smoke-tests
+      count: 1
+      failureLimit: 0
+      provider:
+        job:
+          spec:
+            backoffLimit: 0
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: smoke
+                    image: curlimages/curl:8.11.1
+                    command: ["sh", "-c"]
+                    args:
+                      - |
+                        fail=0
+                        for p in /actuator/health / /vets.html "/owners?lastName=" /owners/1 /owners/find; do
+                          code=$(curl -s -o /dev/null -w '%{http_code}' "http://{{args.service}}$p")
+                          echo "$p -> $code"
+                          [ "$code" = 200 ] || fail=1
+                        done
+                        exit $fail

@@ -2,4 +2,4 @@ target
 build
 .git
 .gradle
-bluegreen
+k8s

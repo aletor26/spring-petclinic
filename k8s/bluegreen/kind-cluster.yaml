@@ -1,0 +1,13 @@
+# Clúster Kubernetes local dentro de Docker (kind)
+#   localhost:8080 -> Service ACTIVO  (lo que ven los usuarios)
+#   localhost:8081 -> Service PREVIEW (versión nueva en prueba)
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: petclinic
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+      - containerPort: 30081
+        hostPort: 8081

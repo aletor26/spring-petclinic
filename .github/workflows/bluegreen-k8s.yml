@@ -1,0 +1,68 @@
+# Pipeline Blue-Green: en cada cambio levanta un clúster kind, despliega la
+# versión estable, despliega la nueva en PREVIEW, corre el análisis y k6,
+# promueve y prueba el rollback.
+name: Blue-Green en Kubernetes (kind)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feature/blue-green-docker]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - 'Dockerfile'
+      - 'k8s/bluegreen/**'
+      - '.github/workflows/bluegreen-k8s.yml'
+
+jobs:
+  bluegreen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BG: k8s/bluegreen/bg.sh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+
+      - name: Instalar plugin de Argo Rollouts
+        run: |
+          sudo curl -sSL -o /usr/local/bin/kubectl-argo-rollouts \
+            https://github.com/argoproj/argo-rollouts/releases/download/v1.10.0/kubectl-argo-rollouts-linux-amd64
+          sudo chmod +x /usr/local/bin/kubectl-argo-rollouts
+
+      - name: Versión estable (ACTIVE)
+        run: $BG up "stable-${GITHUB_SHA::7}"
+
+      - name: Versión nueva en PREVIEW + análisis pre-promoción
+        run: $BG deploy "${GITHUB_SHA::7}"
+
+      - name: Tráfico k6 a ACTIVE y PREVIEW
+        run: $BG load 30
+
+      - name: Promover PREVIEW -> ACTIVE
+        run: |
+          $BG promote
+          curl -s localhost:8080/actuator/info | grep -q "\"version\":\"${GITHUB_SHA::7}\""
+
+      - name: Probar rollback
+        run: |
+          $BG rollback
+          curl -s localhost:8080/actuator/info | grep -q "stable-${GITHUB_SHA::7}"
+
+      - name: Guardar resultados de k6
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-results
+          path: k8s/bluegreen/k6/results/
+
+      - name: Diagnóstico si falla
+        if: failure()
+        run: |
+          $BG status || true
+          kubectl -n petclinic get pods,analysisruns,jobs || true
+          kubectl -n petclinic logs -l app=petclinic --tail=50 || true

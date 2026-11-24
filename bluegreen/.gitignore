@@ -1,3 +1,0 @@
-# Estado local del despliegue (lo genera bg.sh)
-.env
-nginx/active/
