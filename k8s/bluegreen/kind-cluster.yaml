@@ -1,9 +1,15 @@
 # Clúster Kubernetes local dentro de Docker (kind)
 #   localhost:8080 -> Service ACTIVO  (lo que ven los usuarios)
 #   localhost:8081 -> Service PREVIEW (versión nueva en prueba)
+# Las imágenes se descargan de un registro local (localhost:5001) para poder
+# fijarlas por digest (sha256), igual que con un registro real.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: petclinic
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
 nodes:
   - role: control-plane
     extraPortMappings:

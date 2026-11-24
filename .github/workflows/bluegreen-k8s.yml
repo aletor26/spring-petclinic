@@ -6,7 +6,7 @@ name: Blue-Green en Kubernetes (kind)
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/blue-green-docker]
+    branches: [main, 'feature/**']
     paths:
       - 'src/**'
       - 'pom.xml'
@@ -37,11 +37,11 @@ jobs:
       - name: Versión estable (ACTIVE)
         run: $BG up "stable-${GITHUB_SHA::7}"
 
-      - name: Versión nueva en PREVIEW + análisis pre-promoción
-        run: $BG deploy "${GITHUB_SHA::7}"
+      - name: Versión nueva en PREVIEW + análisis pre-promoción (smoke tests + k6 en ventana de 1 min)
+        run: $BG deploy "${GITHUB_SHA::7}" --window 1m
 
-      - name: Tráfico k6 a ACTIVE y PREVIEW
-        run: $BG load 30
+      - name: Copiar resultados de k6 del clúster
+        run: $BG results
 
       - name: Promover PREVIEW -> ACTIVE
         run: |
@@ -53,16 +53,24 @@ jobs:
           $BG rollback
           curl -s localhost:8080/actuator/info | grep -q "stable-${GITHUB_SHA::7}"
 
-      - name: Guardar resultados de k6
+      - name: Actuator restringido (solo health, info, prometheus)
+        run: |
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/actuator/env)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/actuator/health)" = 200
+
+      - name: Guardar resultados de k6 y registro de despliegues
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: k6-results
-          path: k8s/bluegreen/k6/results/
+          name: bluegreen-evidencias
+          path: |
+            k8s/bluegreen/k6/results/
+            k8s/bluegreen/records/
 
       - name: Diagnóstico si falla
         if: failure()
         run: |
           $BG status || true
+          $BG history || true
           kubectl -n petclinic get pods,analysisruns,jobs || true
           kubectl -n petclinic logs -l app=petclinic --tail=50 || true
