@@ -120,7 +120,7 @@ cmd_load() {
   mkdir -p "$out"
   local file="k6-$(date +%Y%m%d-%H%M%S).json"
   log "k6: ${secs}s de tráfico idéntico a ACTIVE y PREVIEW -> k6/results/$file"
-  docker run --rm -i --add-host=host.docker.internal:host-gateway \
+  docker run --rm -i --user "$(id -u):$(id -g)" --add-host=host.docker.internal:host-gateway \
     -e DURATION="${secs}s" \
     -e ACTIVE_URL=http://host.docker.internal:8080 \
     -e PREVIEW_URL=http://host.docker.internal:8081 \
