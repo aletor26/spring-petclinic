@@ -1,0 +1,32 @@
+# Inicializa el esquema y los datos de ejemplo UNA sola vez, antes de la app.
+# Con varias réplicas, si cada pod ejecuta los scripts al arrancar, chocan entre sí
+# (duplicate key). Por eso la app arranca con SPRING_SQL_INIT_MODE=never y la base
+# se prepara con este Job (los scripts vienen de src/main/resources/db/postgres).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: petclinic-db-init
+  namespace: petclinic
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: postgres:18.4
+          command: ["sh", "-c"]
+          args:
+            - |
+              until pg_isready -h petclinic-db -U petclinic; do sleep 2; done
+              psql -h petclinic-db -U petclinic -d petclinic -v ON_ERROR_STOP=1 \
+                -f /sql/schema.sql -f /sql/data.sql
+          env:
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: petclinic-db, key: POSTGRES_PASSWORD}}
+          volumeMounts:
+            - {name: sql, mountPath: /sql}
+      volumes:
+        - name: sql
+          configMap:
+            name: db-init-sql
