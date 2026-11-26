@@ -50,6 +50,8 @@ spec:
               value: "true"
             - name: SPRING_DOCKER_COMPOSE_ENABLED
               value: "false"
+            - name: LOGGING_STRUCTURED_FORMAT_CONSOLE   # logs en JSON (ECS) para que Alloy/Loki los lean por campos
+              value: ecs
           ports:
             - name: http
               containerPort: 8080
