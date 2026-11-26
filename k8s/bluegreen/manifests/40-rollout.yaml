@@ -7,7 +7,7 @@ metadata:
   name: petclinic
   namespace: petclinic
 spec:
-  replicas: 1
+  replicas: 2                  # dos réplicas por versión (R1)
   revisionHistoryLimit: 3
   selector:
     matchLabels:
@@ -17,6 +17,9 @@ spec:
       labels:
         app: petclinic
         version: v1            # lo actualiza bg.sh deploy (sirve para separar métricas por versión)
+      annotations:             # trazabilidad: lo actualiza bg.sh deploy
+        petclinic/commit: "none"
+        petclinic/image: "none"
     spec:
       initContainers:
         - name: wait-db             # no arrancar la app hasta que PostgreSQL acepte conexiones
@@ -24,19 +27,23 @@ spec:
           command: ["sh", "-c", "until pg_isready -h petclinic-db -U petclinic; do sleep 2; done"]
       containers:
         - name: petclinic
-          image: petclinic:v1  # imagen construida localmente, etiquetada con el commit
-          imagePullPolicy: Never
+          image: localhost:5001/petclinic:v1   # bg.sh lo reemplaza por la imagen fijada por digest (@sha256:...)
+          imagePullPolicy: IfNotPresent
           env:
             - name: INFO_APP_VERSION       # índice 0: lo actualiza bg.sh deploy
               value: v1
             - name: SPRING_PROFILES_ACTIVE
               value: postgres
+            - name: SPRING_SQL_INIT_MODE          # la base la inicializa el Job petclinic-db-init
+              value: never
             - name: POSTGRES_URL
               value: jdbc:postgresql://petclinic-db:5432/petclinic
             - name: POSTGRES_USER
               valueFrom: {secretKeyRef: {name: petclinic-db, key: POSTGRES_USER}}
             - name: POSTGRES_PASS
               valueFrom: {secretKeyRef: {name: petclinic-db, key: POSTGRES_PASSWORD}}
+            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE   # solo lo necesario (R1); antes exponía todo (*)
+              value: health,info,prometheus
             - name: MANAGEMENT_INFO_ENV_ENABLED
               value: "true"
             - name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED
@@ -71,3 +78,13 @@ spec:
         args:
           - name: service
             value: petclinic-preview.petclinic.svc.cluster.local
+          - name: window                 # índice 1: duración de la ventana (bg.sh deploy --window)
+            value: 10m
+          - name: preview-version        # índice 2: lo actualiza bg.sh deploy
+            value: v1
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: preview-hash
+            valueFrom:
+              podTemplateHashValue: Latest

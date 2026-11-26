@@ -1,9 +1,15 @@
-# Validación ANTES de pasar el tráfico a la versión nueva (prePromotionAnalysis).
-# Si alguna métrica falla, Argo aborta y el tráfico sigue en la versión estable.
+# Verificación ANTES de pasar el tráfico a la versión nueva (prePromotionAnalysis).
+# Las métricas corren en paralelo; si alguna falla, Argo aborta y el tráfico
+# sigue en la versión estable.
 #
-# Hoy: smoke tests (la app responde 200 en sus páginas clave).
-# Integración con el analizador AIOps (otro equipo): agregar una métrica "web"
-# que llame a su API y apruebe solo si el puntaje >= 75. Ejemplo:
+#   smoke-tests -> páginas clave responden 200 (rápido)
+#   k6-window   -> durante la ventana (10m por defecto) k6 envía el MISMO tráfico
+#                  a active y preview, incluido el flujo de registrar una visita.
+#                  Falla si preview supera 1% de errores o 1% de checks fallidos.
+#                  Guarda cada solicitud en el PVC k6-results (JSON comprimido).
+#
+# Integración con el analizador AIOps (otro equipo): agregar aquí una métrica
+# "web" que llame a su API y apruebe solo si el puntaje >= 75. Ejemplo:
 #
 #   - name: aiops-score
 #     provider:
@@ -20,6 +26,11 @@ metadata:
 spec:
   args:
     - name: service
+    - name: window
+      value: 10m
+    - name: preview-version
+    - name: stable-hash
+    - name: preview-hash
   metrics:
     - name: smoke-tests
       count: 1
@@ -44,3 +55,41 @@ spec:
                           [ "$code" = 200 ] || fail=1
                         done
                         exit $fail
+    - name: k6-window
+      count: 1
+      failureLimit: 0
+      provider:
+        job:
+          spec:
+            backoffLimit: 0
+            template:
+              spec:
+                restartPolicy: Never
+                securityContext:
+                  runAsUser: 0          # para escribir en el volumen local-path
+                containers:
+                  - name: k6
+                    image: grafana/k6:0.57.0
+                    command: ["sh", "-c"]
+                    args:
+                      - |
+                        f="/results/$(date +%Y%m%d-%H%M%S)_{{args.preview-version}}_preview-{{args.preview-hash}}_stable-{{args.stable-hash}}.json.gz"
+                        echo "Ventana {{args.window}} -> $f"
+                        k6 run --quiet --out "json=$f" /scripts/load.js
+                    env:
+                      - name: DURATION
+                        value: "{{args.window}}"
+                      - name: ACTIVE_URL
+                        value: http://petclinic-active.petclinic.svc.cluster.local
+                      - name: PREVIEW_URL
+                        value: http://petclinic-preview.petclinic.svc.cluster.local
+                    volumeMounts:
+                      - {name: script, mountPath: /scripts}
+                      - {name: results, mountPath: /results}
+                volumes:
+                  - name: script
+                    configMap:
+                      name: k6-script
+                  - name: results
+                    persistentVolumeClaim:
+                      claimName: k6-results

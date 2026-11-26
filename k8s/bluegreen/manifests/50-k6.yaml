@@ -1,0 +1,12 @@
+# Disco donde k6 guarda el resultado de cada solicitud durante la ventana de análisis.
+# El analizador AIOps puede montarlo para leer los JSON (Mann-Whitney por solicitud).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: k6-results
+  namespace: petclinic
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
