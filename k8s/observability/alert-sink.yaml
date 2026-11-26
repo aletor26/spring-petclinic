@@ -1,0 +1,78 @@
+# Receptor de prueba para Alertmanager: recibe cada notificación por webhook y la
+# escribe en su log como una línea JSON. Alloy la envía a Loki, así la línea base
+# puede contar cuántas notificaciones llegaron al equipo en cada despliegue.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-sink
+  namespace: monitoring
+data:
+  sink.py: |
+    import json
+    import sys
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            try:
+                msg = json.loads(body)
+                line = {
+                    "event": "notification",
+                    "status": msg.get("status"),
+                    "receiver": msg.get("receiver"),
+                    "group_labels": msg.get("groupLabels"),
+                    "alerts": [
+                        {"status": a.get("status"), "labels": a.get("labels"), "startsAt": a.get("startsAt")}
+                        for a in msg.get("alerts", [])
+                    ],
+                }
+            except ValueError:
+                line = {"event": "notification", "raw": body.decode(errors="replace")}
+            print(json.dumps(line), flush=True)
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):  # sin el log de acceso por defecto
+            pass
+
+    print(json.dumps({"event": "started"}), flush=True)
+    HTTPServer(("", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-sink
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: alert-sink}
+  template:
+    metadata:
+      labels: {app: alert-sink}
+    spec:
+      containers:
+        - name: sink
+          image: python:3.12-slim
+          command: ["python", "-u", "/app/sink.py"]
+          ports:
+            - {name: http, containerPort: 8080}
+          volumeMounts:
+            - {name: code, mountPath: /app}
+          resources:
+            requests: {cpu: 5m, memory: 24Mi}
+            limits: {memory: 64Mi}
+      volumes:
+        - name: code
+          configMap: {name: alert-sink}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-sink
+  namespace: monitoring
+spec:
+  selector: {app: alert-sink}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

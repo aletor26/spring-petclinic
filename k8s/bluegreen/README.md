@@ -117,8 +117,8 @@ En el paso 3. El equipo del analizador agrega una tercera métrica `web` al
   para la prueba de Mann-Whitney.
 - `/actuator/info` con la versión desplegada.
 
-Pendiente de coordinar: dependencia `micrometer-registry-prometheus` para que
-`/actuator/prometheus` (ya permitido) responda.
+- `/actuator/prometheus` con métricas por versión (Prometheus, Grafana y Loki en
+  `k8s/observability/`).
 
 ## Pruebas realizadas (24/11/2026, Mac con OrbStack)
 

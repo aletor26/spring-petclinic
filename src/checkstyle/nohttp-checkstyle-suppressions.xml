@@ -10,4 +10,6 @@
 	<suppress files=".+\.(jar|git|ico|p12|gif|jks|jpg|svg|log)" checks="NoHttp"/>
 	<!-- Despliegue blue-green local: tráfico interno del clúster kind y del registro local, sin TLS -->
 	<suppress files="k8s[\\/]bluegreen[\\/].*" checks="NoHttp"/>
+	<!-- Observabilidad local: Prometheus, Loki, Grafana y Alertmanager dentro del clúster kind, sin TLS -->
+	<suppress files="k8s[\\/]observability[\\/].*" checks="NoHttp"/>
 </suppressions>

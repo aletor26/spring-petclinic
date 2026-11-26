@@ -1,0 +1,104 @@
+# Prometheus + Alertmanager + Grafana para el clúster kind de PetClinic.
+# Pensado para una laptop: retención corta, pocos recursos y sin los componentes
+# del control plane que kind no expone.
+
+# Las reglas por defecto generan alertas del clúster (etcd, kubelet, Watchdog...)
+# que ensuciarían el conteo de alertas de la línea base. Las reglas de PetClinic
+# se agregan aparte con un PrometheusRule (tarea 3).
+defaultRules:
+  create: false
+
+kubeEtcd: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeProxy: {enabled: false}
+coreDns: {enabled: false}
+kubelet: {enabled: false}
+nodeExporter: {enabled: false}
+prometheus-node-exporter: {enabled: false}
+
+# kube-state-metrics se queda: da los reinicios de pods (regla PetclinicPodRestarts).
+kube-state-metrics:
+  resources:
+    requests: {cpu: 20m, memory: 48Mi}
+    limits: {memory: 128Mi}
+
+prometheusOperator:
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {memory: 256Mi}
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    scrapeInterval: 15s          # ventanas de 10 min: con 15 s hay 40 puntos por serie
+    evaluationInterval: 15s
+    # Tomar cualquier PodMonitor / ServiceMonitor / PrometheusRule del clúster,
+    # no solo los que tienen la etiqueta del release de Helm.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 100m, memory: 384Mi}
+      limits: {memory: 1Gi}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests: {storage: 4Gi}
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {memory: 128Mi}
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: alert-sink
+      # Una sola causa no debe generar muchos avisos: se agrupan por alerta y versión.
+      group_by: [alertname, version]
+      group_wait: 30s
+      group_interval: 2m
+      repeat_interval: 1h
+      routes: []                 # reemplaza las rutas por defecto del chart (Watchdog → "null")
+    inhibit_rules:
+      # Si un pod de una versión está caído, sus alertas de latencia y errores son síntomas.
+      - source_matchers: [alertname = PetclinicDown]
+        target_matchers: [alertname =~ "PetclinicHighLatency|PetclinicHighErrorRate"]
+        equal: [version]
+      # Si la base está caída, afecta a las dos versiones a la vez.
+      - source_matchers: [alertname = PostgresDown]
+        target_matchers: [alertname =~ "PetclinicHighLatency|PetclinicHighErrorRate"]
+    receivers:
+      - name: alert-sink
+        webhook_configs:
+          # Receptor de prueba dentro del clúster (alert-sink.yaml). Cada aviso queda en su log
+          # y Alloy lo envía a Loki, así se puede contar cuántas notificaciones llegaron.
+          - url: http://alert-sink.monitoring.svc:8080/
+            send_resolved: true
+      - name: "null"             # el chart lo referencia; se deja definido aunque no se use
+
+grafana:
+  adminUser: admin
+  adminPassword: admin           # solo para el clúster local
+  grafana.ini:
+    auth.anonymous:              # ver dashboards sin login (solo lectura), útil para capturas y demos
+      enabled: true
+      org_role: Viewer
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}          # con 384Mi Grafana 13 se quedaba sin memoria y saturaba la CPU
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard   # obs.sh crea un ConfigMap con esta etiqueta por cada JSON
+      labelValue: "1"
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki.monitoring.svc:3100
