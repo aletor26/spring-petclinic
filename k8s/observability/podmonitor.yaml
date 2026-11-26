@@ -1,0 +1,23 @@
+# Prometheus lee /actuator/prometheus de cada pod de PetClinic (blue y green).
+# Las etiquetas version y rollouts_pod_template_hash del pod pasan a cada serie:
+# sin ellas no se pueden comparar las dos versiones.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: petclinic
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [petclinic]
+  selector:
+    matchLabels:
+      app: petclinic
+  podMetricsEndpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_version]
+          targetLabel: version
+        - sourceLabels: [__meta_kubernetes_pod_label_rollouts_pod_template_hash]
+          targetLabel: rollouts_pod_template_hash
