@@ -62,13 +62,16 @@ public class WebConfiguration implements WebMvcConfigurer {
 	@Override
 	public void addInterceptors(InterceptorRegistry registry) {
 		registry.addInterceptor(localeChangeInterceptor());
-		registry.addInterceptor(this.controlledFaults.getObject());
+		ControlledFaults faults = this.controlledFaults.getIfAvailable();
+		if (faults != null) {
+			registry.addInterceptor(faults);
+		}
 	}
 
 	@Bean
 	public ControlledFaults controlledFaults(org.springframework.core.env.Environment environment,
-			javax.sql.DataSource dataSource) {
-		return new ControlledFaults(environment, dataSource);
+			ObjectProvider<javax.sql.DataSource> dataSources) {
+		return new ControlledFaults(environment, dataSources.getIfAvailable());
 	}
 
 }

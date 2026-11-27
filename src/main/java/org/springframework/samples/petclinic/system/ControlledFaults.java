@@ -47,7 +47,7 @@ public class ControlledFaults implements ApplicationRunner, HandlerInterceptor {
 
 	public ControlledFaults(Environment environment, DataSource dataSource) {
 		this.environment = environment;
-		this.jdbcTemplate = new JdbcTemplate(dataSource);
+		this.jdbcTemplate = dataSource == null ? null : new JdbcTemplate(dataSource);
 		this.fault = environment.getProperty("FAULT", "").trim().toLowerCase();
 	}
 
@@ -77,6 +77,9 @@ public class ControlledFaults implements ApplicationRunner, HandlerInterceptor {
 
 	public void delayOwnerSearchIfSelected() {
 		if ("slow-query".equals(this.fault)) {
+			if (this.jdbcTemplate == null) {
+				throw new IllegalStateException("FAULT=slow-query requires a DataSource");
+			}
 			this.jdbcTemplate.execute("SELECT pg_sleep(0.5)");
 		}
 	}
