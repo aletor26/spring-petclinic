@@ -29,6 +29,7 @@ spec:
     - name: window
       value: 10m
     - name: preview-version
+    - name: fault
     - name: stable-hash
     - name: preview-hash
   metrics:
@@ -79,6 +80,8 @@ spec:
                     env:
                       - name: DURATION
                         value: "{{args.window}}"
+                      - name: FAULT
+                        value: "{{args.fault}}"
                       - name: ACTIVE_URL
                         value: http://petclinic-active.petclinic.svc.cluster.local
                       - name: PREVIEW_URL

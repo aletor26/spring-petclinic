@@ -28,6 +28,7 @@ import org.springframework.test.context.aot.DisabledInAotMode;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.samples.petclinic.system.ControlledFaults;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -70,6 +71,9 @@ class OwnerControllerTests {
 	@MockitoBean
 	private OwnerRepository owners;
 
+	@MockitoBean
+	private ControlledFaults controlledFaults;
+
 	private Owner george() {
 		Owner george = new Owner();
 		george.setId(TEST_OWNER_ID);
@@ -91,6 +95,7 @@ class OwnerControllerTests {
 
 	@BeforeEach
 	void setup() {
+		given(this.controlledFaults.preHandle(any(), any(), any())).willReturn(true);
 
 		Owner george = george();
 		given(this.owners.findByLastNameStartingWith(eq("Franklin"), any(Pageable.class)))

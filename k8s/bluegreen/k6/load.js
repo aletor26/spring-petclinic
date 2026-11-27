@@ -8,7 +8,8 @@ import http from 'k6/http';
 import { check } from 'k6';
 
 const DURATION = __ENV.DURATION || '60s';
-const RATE = Number(__ENV.RATE || 5);           // solicitudes por segundo a CADA versión
+const FAULT = __ENV.FAULT || '';
+const RATE = Number(__ENV.RATE || (FAULT === 'slow-query' ? 50 : 5)); // solicitudes por segundo por versión
 const FUNCTIONAL_SHARE = 0.1;                   // 10% de las iteraciones registran una visita
 const ACTIVE_URL = __ENV.ACTIVE_URL || 'http://localhost:8080';
 const PREVIEW_URL = __ENV.PREVIEW_URL || 'http://localhost:8081';
@@ -56,7 +57,7 @@ function run(base, target, version) {
                           { date: tomorrow(), description }, { tags });
     check(res, { 'visita registrada': (r) => r.status === 200 && r.body.includes(description) }, tags);
   } else {
-    const path = BROWSE[Math.floor(Math.random() * BROWSE.length)];
+    const path = FAULT === 'slow-query' ? '/owners?lastName=' : BROWSE[Math.floor(Math.random() * BROWSE.length)];
     const tags = { target, version, route: path };
     const res = http.get(`${base}${path}`, { tags });
     check(res, { 'status 200': (r) => r.status === 200 }, tags);

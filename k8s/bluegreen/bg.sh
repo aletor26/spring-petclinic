@@ -2,7 +2,7 @@
 # Blue-Green de Spring PetClinic en Kubernetes local (kind + Argo Rollouts).
 #
 #   ./bg.sh up [version]                     Crea registro + clúster, instala Argo y despliega la primera versión
-#   ./bg.sh deploy [version] [--window 10m]  Despliega el código actual en PREVIEW y corre el análisis:
+#   ./bg.sh deploy [version] [--window 10m] [--fault tipo]  Despliega PREVIEW y corre el análisis:
 #                                            smoke tests + k6 durante la ventana (por defecto 10m)
 #   ./bg.sh promote                          Pasa el tráfico de usuarios a la versión en PREVIEW
 #   ./bg.sh abort                            Descarta la versión en PREVIEW (el tráfico no cambia)
@@ -53,8 +53,9 @@ record() {  # record <accion> <resultado>
   window=$(k get rollout petclinic -o jsonpath='{.spec.strategy.blueGreen.prePromotionAnalysis.args[1].value}' 2>/dev/null || true)
   ar=$(k get analysisrun --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)
   if [ -n "$ar" ]; then ar_phase=$(k get analysisrun "$ar" -o jsonpath='{.status.phase}' 2>/dev/null || true); fi
-  printf '{"time":"%s","action":"%s","result":"%s","version":"%s","commit":"%s","image":"%s","stable_hash":"%s","preview_hash":"%s","active_version":"%s","window":"%s","analysis_run":"%s","analysis_phase":"%s","k6_scenario":"k6/load.js"}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$version" "$(commit_id)" "$image" "$stable" "$current" \
+  local fault; fault=$(k get rollout petclinic -o jsonpath='{.spec.template.spec.containers[0].env[1].value}' 2>/dev/null || true)
+  printf '{"time":"%s","action":"%s","result":"%s","version":"%s","fault":"%s","commit":"%s","image":"%s","stable_hash":"%s","preview_hash":"%s","active_version":"%s","window":"%s","analysis_run":"%s","analysis_phase":"%s","k6_scenario":"k6/load.js"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$version" "${fault:-none}" "$(commit_id)" "$image" "$stable" "$current" \
     "$(version_at $ACTIVE_URL)" "$window" "$ar" "$ar_phase" >> "$RECORDS"
 }
 
@@ -89,15 +90,17 @@ apply_k6_script() {
   k create configmap k6-script --from-file=load.js="$HERE/k6/load.js" --dry-run=client -o yaml | k apply -f - >/dev/null
 }
 
-set_version() {  # set_version <version> <image-ref> <window>
+set_version() {  # set_version <version> <image-ref> <window> <fault>
   k patch rollout petclinic --type json -p "[
     {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/image\",\"value\":\"$2\"},
     {\"op\":\"replace\",\"path\":\"/spec/template/metadata/labels/version\",\"value\":\"$1\"},
     {\"op\":\"replace\",\"path\":\"/spec/template/metadata/annotations/petclinic~1commit\",\"value\":\"$(commit_id)\"},
     {\"op\":\"replace\",\"path\":\"/spec/template/metadata/annotations/petclinic~1image\",\"value\":\"$2\"},
     {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/0/value\",\"value\":\"$1\"},
+    {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/1/value\",\"value\":\"$4\"},
     {\"op\":\"replace\",\"path\":\"/spec/strategy/blueGreen/prePromotionAnalysis/args/1/value\",\"value\":\"$3\"},
-    {\"op\":\"replace\",\"path\":\"/spec/strategy/blueGreen/prePromotionAnalysis/args/2/value\",\"value\":\"$1\"}]" >/dev/null
+    {\"op\":\"replace\",\"path\":\"/spec/strategy/blueGreen/prePromotionAnalysis/args/2/value\",\"value\":\"$1\"},
+    {\"op\":\"replace\",\"path\":\"/spec/strategy/blueGreen/prePromotionAnalysis/args/3/value\",\"value\":\"$4\"}]" >/dev/null
 }
 
 # ---------- comandos ----------
@@ -132,7 +135,7 @@ cmd_up() {
   local f
   for f in 20-services 30-analysis-template 50-k6; do kc apply -f "$HERE/manifests/$f.yaml"; done
   if k get rollout petclinic >/dev/null 2>&1; then
-    set_version "$v" "$IMAGE_REF" 10m
+    set_version "$v" "$IMAGE_REF" 10m "${FAULT:-}"
   else
     sed -e "s|localhost:5001/petclinic:v1|$IMAGE_REF|" -e "s/version: v1/version: $v/" -e "s/value: v1/value: $v/" \
         -e "s/petclinic\/commit: \"none\"/petclinic\/commit: \"$(commit_id)\"/" \
@@ -145,19 +148,22 @@ cmd_up() {
 }
 
 cmd_deploy() {
-  local v="" window=10m
+  local v="" window=10m fault=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --window) window="$2"; shift 2 ;;
+      --fault) fault="$2"; shift 2 ;;
       *) v="$1"; shift ;;
     esac
   done
   v="${v:-$(default_version)}"
+  case "$fault" in ""|latency|slow-query|visit-write|heap-leak) ;; *) fail "FAULT inválido: $fault" ;; esac
+  export FAULT="$fault"
   build_and_push "$v"
   apply_k6_script
   log "Desplegando $v en PREVIEW (los usuarios siguen en la versión actual)"
-  set_version "$v" "$IMAGE_REF" "$window"
-  log "Análisis previo: smoke tests + k6 durante $window (tráfico igual a active y preview)..."
+  set_version "$v" "$IMAGE_REF" "$window" "$fault"
+  log "FAULT=${fault:-none}; análisis previo durante $window..."
   sleep 5
   local i phase
   for i in $(seq 1 480); do   # hasta 40 min

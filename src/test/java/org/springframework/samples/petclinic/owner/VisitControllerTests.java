@@ -17,6 +17,7 @@
 package org.springframework.samples.petclinic.owner;
 
 import static org.mockito.BDDMockito.given;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
@@ -31,6 +32,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.aot.DisabledInAotMode;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.samples.petclinic.system.ControlledFaults;
 
 import java.time.LocalDate;
 import java.util.Optional;
@@ -56,8 +58,12 @@ class VisitControllerTests {
 	@MockitoBean
 	private OwnerRepository owners;
 
+	@MockitoBean
+	private ControlledFaults controlledFaults;
+
 	@BeforeEach
 	void init() {
+		given(this.controlledFaults.preHandle(any(), any(), any())).willReturn(true);
 		Owner owner = new Owner();
 		Pet pet = new Pet();
 		owner.addPet(pet);

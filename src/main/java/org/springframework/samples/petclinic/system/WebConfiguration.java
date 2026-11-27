@@ -2,6 +2,7 @@ package org.springframework.samples.petclinic.system;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.servlet.LocaleResolver;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -23,6 +24,12 @@ import java.util.Locale;
 @Configuration
 @SuppressWarnings("unused")
 public class WebConfiguration implements WebMvcConfigurer {
+
+	private final ObjectProvider<ControlledFaults> controlledFaults;
+
+	public WebConfiguration(ObjectProvider<ControlledFaults> controlledFaults) {
+		this.controlledFaults = controlledFaults;
+	}
 
 	/**
 	 * Uses session storage to remember the user’s language setting across requests.
@@ -55,6 +62,13 @@ public class WebConfiguration implements WebMvcConfigurer {
 	@Override
 	public void addInterceptors(InterceptorRegistry registry) {
 		registry.addInterceptor(localeChangeInterceptor());
+		registry.addInterceptor(this.controlledFaults.getObject());
+	}
+
+	@Bean
+	public ControlledFaults controlledFaults(org.springframework.core.env.Environment environment,
+			javax.sql.DataSource dataSource) {
+		return new ControlledFaults(environment, dataSource);
 	}
 
 }

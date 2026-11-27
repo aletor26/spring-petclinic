@@ -30,6 +30,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.samples.petclinic.system.ControlledFaults;
 
 import java.util.List;
 
@@ -53,6 +54,9 @@ class VetControllerTests {
 	@MockitoBean
 	private VetRepository vets;
 
+	@MockitoBean
+	private ControlledFaults controlledFaults;
+
 	private Vet james() {
 		Vet james = new Vet();
 		james.setFirstName("James");
@@ -75,6 +79,7 @@ class VetControllerTests {
 
 	@BeforeEach
 	void setup() {
+		given(this.controlledFaults.preHandle(any(), any(), any())).willReturn(true);
 		given(this.vets.findAll()).willReturn(Lists.newArrayList(james(), helen()));
 		given(this.vets.findAll(any(Pageable.class)))
 			.willReturn(new PageImpl<Vet>(Lists.newArrayList(james(), helen())));
