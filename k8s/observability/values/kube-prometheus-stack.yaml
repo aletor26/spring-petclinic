@@ -17,8 +17,13 @@ kubelet: {enabled: false}
 nodeExporter: {enabled: false}
 prometheus-node-exporter: {enabled: false}
 
-# kube-state-metrics se queda: da los reinicios de pods (regla PetclinicPodRestarts).
+# kube-state-metrics se queda: da los reinicios de pods (regla PetclinicPodRestarts) y las
+# réplicas listas de PostgreSQL (regla PostgresDown).
 kube-state-metrics:
+  # Publica las etiquetas app y version de cada pod en kube_pod_labels (label_app, label_version)
+  # para que PetclinicPodRestarts sepa a qué versión pertenece el pod que se reinició.
+  metricLabelsAllowlist:
+    - pods=[app,version]
   resources:
     requests: {cpu: 20m, memory: 48Mi}
     limits: {memory: 128Mi}
@@ -69,9 +74,10 @@ alertmanager:
       - source_matchers: [alertname = PetclinicDown]
         target_matchers: [alertname =~ "PetclinicHighLatency|PetclinicHighErrorRate"]
         equal: [version]
-      # Si la base está caída, afecta a las dos versiones a la vez.
+      # Si la base está caída, afecta a las dos versiones a la vez. El pool de conexiones
+      # saturado también es un síntoma de la misma causa (los hilos esperan una conexión).
       - source_matchers: [alertname = PostgresDown]
-        target_matchers: [alertname =~ "PetclinicHighLatency|PetclinicHighErrorRate"]
+        target_matchers: [alertname =~ "PetclinicHighLatency|PetclinicHighErrorRate|PetclinicPoolSaturated"]
     receivers:
       - name: alert-sink
         webhook_configs:

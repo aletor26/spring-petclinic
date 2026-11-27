@@ -26,6 +26,7 @@ pods petclinic (version=v1 | v2) ──/actuator/prometheus──► Prometheus 
 | Loki | `values/loki.yaml` | Modo SingleBinary, disco local, retención de 48 h |
 | Grafana Alloy | `values/alloy.yaml` | Envía a Loki los logs de PetClinic y los eventos del Rollout |
 | PodMonitor | `podmonitor.yaml` | Prometheus lee cada pod y conserva `version` y `rollouts_pod_template_hash` |
+| Reglas de alerta | `rules/petclinic-rules.yaml` | Umbrales fijos y SLO de la línea base (tarea 3) |
 | Receptor de alertas | `alert-sink.yaml` | Webhook de prueba: escribe cada notificación en su log (y llega a Loki) |
 | Dashboard | `dashboards/petclinic-bluegreen.json` | "PetClinic Blue vs Green" |
 | Script | `obs.sh` | Todos los comandos |
@@ -42,6 +43,7 @@ Requiere el clúster levantado (`k8s/bluegreen/bg.sh up`) y `helm` (`brew instal
 | `k8s/observability/obs.sh alertmanager` | Alertmanager en http://localhost:9093 |
 | `k8s/observability/obs.sh status` | Pods de monitoring y pods de PetClinic que Prometheus está leyendo |
 | `k8s/observability/obs.sh dashboards` | Recarga los JSON de `dashboards/` después de editarlos |
+| `k8s/observability/obs.sh rules` | Aplica las reglas de alerta de `rules/` (línea base) |
 | `k8s/observability/obs.sh down` | Desinstala todo |
 
 **Recursos:** con Docker Desktop, darle al menos 10-12 GB de memoria (Settings → Resources).
@@ -90,8 +92,9 @@ Variables `Versión` y `Ruta`. Paneles, todos separados por versión:
 
 - `group_by: [alertname, version]`: una sola causa no genera un aviso por cada pod.
 - Inhibición: `PetclinicDown` silencia `PetclinicHighLatency` y `PetclinicHighErrorRate` de la
-  misma versión; `PostgresDown` las silencia en las dos versiones.
+  misma versión; `PostgresDown` las silencia en las dos versiones, junto con `PetclinicPoolSaturated`.
 - Receptor: `alert-sink` (webhook dentro del clúster). Para contar las notificaciones de una
   corrida en Grafana → Explore → Loki: `{app="alert-sink"} |= "notification"`.
-- Las reglas de alerta (umbrales) las agrega la tarea 3 con un `PrometheusRule` en cualquier
-  namespace: Prometheus está configurado para tomarlos todos.
+- Las reglas de alerta (umbrales fijos de la línea base, tarea 3) están en
+  `rules/petclinic-rules.yaml`. `obs.sh up` las aplica, y `obs.sh rules` las vuelve a aplicar
+  después de editarlas o calibrarlas. El protocolo de medición está en `docs/linea-base.md`.
