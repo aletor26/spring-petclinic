@@ -1,0 +1,223 @@
+# Pruebas unitarias de las reglas de la línea base (promtool test rules).
+# rules.generated.yaml son los "groups" de ../petclinic-rules.yaml sin el envoltorio del
+# PrometheusRule. Lo genera k8s/observability/rules/tests/run.sh (y el workflow alert-rules).
+rule_files:
+  - rules.generated.yaml
+
+evaluation_interval: 15s
+
+tests:
+  # ---------------------------------------------------------------- errores 5xx
+  - name: errores 5xx por versión, sin contar /oups
+    interval: 1m
+    input_series:
+      # v2 (preview): 5 % de 5xx en /owners
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v2", uri="/owners", status="200"}'
+        values: '0+570x20'
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v2", uri="/owners", status="500"}'
+        values: '0+30x20'
+      # v1 (activa): sana, pero recibe muchos errores provocados en /oups
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v1", uri="/owners", status="200"}'
+        values: '0+600x20'
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v1", uri="/oups", status="500"}'
+        values: '0+600x20'
+      # Las sondas no cuentan en el denominador
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v2", uri="/actuator/health/readiness", status="200"}'
+        values: '0+100000x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PetclinicHighErrorRate
+        exp_alerts: []          # todavía no cumple "for: 2m"
+      - eval_time: 10m
+        alertname: PetclinicHighErrorRate
+        exp_alerts:
+          - exp_labels: {severity: critical, linea_base: "si", version: v2}
+            exp_annotations:
+              summary: "Errores 5xx 5% en la versión v2"
+
+  # ---------------------------------------------------------------- latencia p95
+  - name: p95 por ruta sobre el umbral solo en la versión lenta
+    interval: 1m
+    input_series:
+      # v2: todas las respuestas de /vets.html entre 0,5 y 1 s (umbral provisional 0,5 s)
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v2", uri="/vets.html", le="0.1"}'
+        values: '0+0x20'
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v2", uri="/vets.html", le="0.5"}'
+        values: '0+0x20'
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v2", uri="/vets.html", le="1.0"}'
+        values: '0+60x20'
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v2", uri="/vets.html", le="+Inf"}'
+        values: '0+60x20'
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v2", uri="/vets.html", status="200"}'
+        values: '0+60x20'
+      # v1: todo por debajo de 0,1 s
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v1", uri="/vets.html", le="0.1"}'
+        values: '0+60x20'
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v1", uri="/vets.html", le="0.5"}'
+        values: '0+60x20'
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v1", uri="/vets.html", le="1.0"}'
+        values: '0+60x20'
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v1", uri="/vets.html", le="+Inf"}'
+        values: '0+60x20'
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v1", uri="/vets.html", status="200"}'
+        values: '0+60x20'
+      # Una ruta sin umbral definido no alerta aunque sea lenta
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v2", uri="/owners/new", le="1.0"}'
+        values: '0+0x20'
+      - series: 'http_server_requests_seconds_bucket{namespace="petclinic", version="v2", uri="/owners/new", le="+Inf"}'
+        values: '0+60x20'
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v2", uri="/owners/new", status="200"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PetclinicHighLatency
+        exp_alerts:
+          - exp_labels: {severity: warning, linea_base: "si", uri: /vets.html, version: v2}
+            exp_annotations:
+              summary: "p95 de /vets.html = 975ms en la versión v2"
+
+  # ---------------------------------------------------------------- pool de conexiones
+  - name: pool saturado durante más de 1 minuto
+    interval: 15s
+    input_series:
+      - series: 'hikaricp_connections_pending{namespace="petclinic", pod="p2", version="v2", pool="HikariPool-1"}'
+        values: '0 0 0 0 5x20'
+      - series: 'hikaricp_connections_pending{namespace="petclinic", pod="p1", version="v1", pool="HikariPool-1"}'
+        values: '0x24'
+    alert_rule_test:
+      - eval_time: 1m30s
+        alertname: PetclinicPoolSaturated
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: PetclinicPoolSaturated
+        exp_alerts:
+          - exp_labels: {severity: warning, linea_base: "si", pod: p2, version: v2}
+            exp_annotations:
+              summary: "Pool de conexiones saturado en p2 (versión v2)"
+
+  # ---------------------------------------------------------------- heap
+  - name: heap sobre 85 % durante 5 minutos, ignorando áreas sin máximo
+    interval: 1m
+    input_series:
+      - series: 'jvm_memory_used_bytes{namespace="petclinic", pod="p2", version="v2", area="heap", id="Tenured Gen"}'
+        values: '90x10'
+      - series: 'jvm_memory_max_bytes{namespace="petclinic", pod="p2", version="v2", area="heap", id="Tenured Gen"}'
+        values: '100x10'
+      - series: 'jvm_memory_used_bytes{namespace="petclinic", pod="p2", version="v2", area="heap", id="G1 Eden Space"}'
+        values: '0x10'
+      - series: 'jvm_memory_max_bytes{namespace="petclinic", pod="p2", version="v2", area="heap", id="G1 Eden Space"}'
+        values: '-1x10'
+      - series: 'jvm_memory_used_bytes{namespace="petclinic", pod="p1", version="v1", area="heap", id="Tenured Gen"}'
+        values: '50x10'
+      - series: 'jvm_memory_max_bytes{namespace="petclinic", pod="p1", version="v1", area="heap", id="Tenured Gen"}'
+        values: '100x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PetclinicHeapHigh
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: PetclinicHeapHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, linea_base: "si", pod: p2, version: v2}
+            exp_annotations:
+              summary: "Heap al 90% en p2 (versión v2)"
+
+  # ---------------------------------------------------------------- pod caído
+  - name: pod caído, sin alertar por un pod recién creado
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="petclinic", job="monitoring/petclinic", pod="p2", version="v2"}'
+        values: '0x20'
+      - series: 'kube_pod_start_time{namespace="petclinic", pod="p2", uid="a"}'
+        values: '0x20'
+      # p3 arrancó en el segundo 500: a los 10 min tiene 100 s de vida
+      - series: 'up{namespace="petclinic", job="monitoring/petclinic", pod="p3", version="v3"}'
+        values: '0x20'
+      - series: 'kube_pod_start_time{namespace="petclinic", pod="p3", uid="b"}'
+        values: '500x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PetclinicDown
+        exp_alerts:
+          - exp_labels: {severity: critical, linea_base: "si", job: monitoring/petclinic, namespace: petclinic, pod: p2, version: v2}
+            exp_annotations:
+              summary: "Prometheus no puede leer p2 (versión v2)"
+
+  # ---------------------------------------------------------------- PostgreSQL
+  - name: PostgreSQL escalado a 0
+    interval: 1m
+    input_series:
+      - series: 'kube_statefulset_status_replicas_ready{namespace="petclinic", statefulset="petclinic-db"}'
+        values: '1 1 1 0 0 0 0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PostgresDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: PostgresDown
+        exp_alerts:
+          - exp_labels: {severity: critical, linea_base: "si", statefulset: petclinic-db, version: todas}
+            exp_annotations:
+              summary: "PostgreSQL sin réplicas listas: afecta a las dos versiones"
+      - eval_time: 10m
+        alertname: PostgresDown
+        exp_alerts: []          # la base volvió
+
+  # ---------------------------------------------------------------- reinicios
+  - name: reinicio de un pod, con la versión tomada de kube_pod_labels
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="petclinic", pod="p2", container="petclinic", uid="a"}'
+        values: '0 0 0 1 1 1 1 1 1 1 1'
+      - series: 'kube_pod_labels{namespace="petclinic", pod="p2", label_app="petclinic", label_version="v2", uid="a"}'
+        values: '1x10'
+      - series: 'kube_pod_container_status_restarts_total{namespace="petclinic", pod="p1", container="petclinic", uid="c"}'
+        values: '0x10'
+      - series: 'kube_pod_labels{namespace="petclinic", pod="p1", label_app="petclinic", label_version="v1", uid="c"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PetclinicPodRestarts
+        exp_alerts:
+          - exp_labels: {severity: warning, linea_base: "si", namespace: petclinic, pod: p2, version: v2}
+            exp_annotations:
+              summary: "p2 se reinició (versión v2)"
+
+  # ---------------------------------------------------------------- SLO
+  - name: reglas de grabación de los SLO
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v2", method="POST", uri="/owners/{ownerId}/pets/{petId}/visits/new", status="302"}'
+        values: '0+75x20'
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v2", method="POST", uri="/owners/{ownerId}/pets/{petId}/visits/new", status="500"}'
+        values: '0+25x20'
+    promql_expr_test:
+      - expr: petclinic:visit_success:ratio_rate10m
+        eval_time: 15m
+        exp_samples:
+          - labels: 'petclinic:visit_success:ratio_rate10m{version="v2"}'
+            value: 0.75
+      - expr: petclinic:availability:ratio_rate10m
+        eval_time: 15m
+        exp_samples:
+          - labels: 'petclinic:availability:ratio_rate10m{version="v2"}'
+            value: 0.75
+
+  - name: SLO en 100 % cuando no hubo ningún 5xx (no debe quedar vacío)
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v1", method="POST", uri="/owners/{ownerId}/pets/{petId}/visits/new", status="302"}'
+        values: '0+50x20'
+      - series: 'http_server_requests_seconds_count{namespace="petclinic", version="v1", method="GET", uri="/vets.html", status="200"}'
+        values: '0+300x20'
+    promql_expr_test:
+      - expr: petclinic:visit_success:ratio_rate10m
+        eval_time: 15m
+        exp_samples:
+          - labels: 'petclinic:visit_success:ratio_rate10m{version="v1"}'
+            value: 1
+      - expr: petclinic:availability:ratio_rate10m
+        eval_time: 15m
+        exp_samples:
+          - labels: 'petclinic:availability:ratio_rate10m{version="v1"}'
+            value: 1
