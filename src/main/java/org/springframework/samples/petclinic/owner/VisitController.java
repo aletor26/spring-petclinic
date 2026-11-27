@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 
 import jakarta.validation.Valid;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+import org.springframework.samples.petclinic.system.ControlledFaults;
 
 /**
  * @author Juergen Hoeller
@@ -44,8 +45,11 @@ class VisitController {
 
 	private final OwnerRepository owners;
 
-	public VisitController(OwnerRepository owners) {
+	private final ControlledFaults controlledFaults;
+
+	public VisitController(OwnerRepository owners, ControlledFaults controlledFaults) {
 		this.owners = owners;
+		this.controlledFaults = controlledFaults;
 	}
 
 	@InitBinder
@@ -105,6 +109,7 @@ class VisitController {
 			return "pets/createOrUpdateVisitForm";
 		}
 
+		this.controlledFaults.failVisitWriteIfSelected();
 		owner.addVisit(petId, visit);
 		this.owners.save(owner);
 		redirectAttributes.addFlashAttribute("message", "Your visit has been booked");

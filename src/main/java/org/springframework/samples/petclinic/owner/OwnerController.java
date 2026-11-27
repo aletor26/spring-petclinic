@@ -37,6 +37,8 @@ import org.springframework.web.servlet.ModelAndView;
 import jakarta.validation.Valid;
 
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+import org.springframework.samples.petclinic.system.ControlledFaults;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * @author Juergen Hoeller
@@ -52,8 +54,11 @@ class OwnerController {
 
 	private final OwnerRepository owners;
 
-	public OwnerController(OwnerRepository owners) {
+	private final ControlledFaults controlledFaults;
+
+	public OwnerController(OwnerRepository owners, ControlledFaults controlledFaults) {
 		this.owners = owners;
+		this.controlledFaults = controlledFaults;
 	}
 
 	@InitBinder
@@ -92,6 +97,7 @@ class OwnerController {
 	}
 
 	@GetMapping("/owners")
+	@Transactional
 	public String processFindForm(@RequestParam(defaultValue = "1") int page, Owner owner, BindingResult result,
 			Model model, RedirectAttributes redirectAttributes) {
 		// allow parameterless GET request for /owners to return all records
@@ -142,6 +148,7 @@ class OwnerController {
 		int pageSize = 5;
 		int validatedPage = Math.max(page, 1);
 		Pageable pageable = PageRequest.of(validatedPage - 1, pageSize);
+		this.controlledFaults.delayOwnerSearchIfSelected();
 		return owners.findByLastNameStartingWith(lastname, pageable);
 	}
 

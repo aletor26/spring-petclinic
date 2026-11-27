@@ -17,11 +17,15 @@
 package org.springframework.samples.petclinic.system;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.condition.DisabledInNativeImage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.aot.DisabledInAotMode;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -34,6 +38,14 @@ class WelcomeControllerTests {
 
 	@Autowired
 	private MockMvc mockMvc;
+
+	@MockitoBean
+	private ControlledFaults controlledFaults;
+
+	@BeforeEach
+	void setUp() {
+		given(this.controlledFaults.preHandle(any(), any(), any())).willReturn(true);
+	}
 
 	@Test
 	void welcome() throws Exception {

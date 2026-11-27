@@ -52,7 +52,7 @@ Desde la raíz del repo:
 | Comando | Qué hace |
 |---|---|
 | `k8s/bluegreen/bg.sh up` | Registro + clúster + Argo Rollouts + primera versión |
-| `k8s/bluegreen/bg.sh deploy [versión] [--window 10m]` | Construye el código actual, lo levanta en PREVIEW y corre el análisis durante la ventana. Versión por defecto: commit actual |
+| `k8s/bluegreen/bg.sh deploy [versión] [--window 10m] [--fault tipo]` | Despliega en PREVIEW con `FAULT` opcional (`latency`, `slow-query`, `visit-write`, `heap-leak`) |
 | `k8s/bluegreen/bg.sh promote` | Pasa a los usuarios a la versión PREVIEW |
 | `k8s/bluegreen/bg.sh abort` | Descarta la PREVIEW. Los usuarios no se enteran |
 | `k8s/bluegreen/bg.sh rollback` | Vuelve a la versión anterior después de promover |
@@ -62,6 +62,10 @@ Desde la raíz del repo:
 | `k8s/bluegreen/bg.sh traffic` | Una petición cada 0.5 s: código HTTP y versión que respondió |
 | `k8s/bluegreen/bg.sh load [seg]` | k6 manual desde la máquina contra active y preview |
 | `k8s/bluegreen/bg.sh down` | Borra el clúster y el registro |
+
+`FAULT` vacío mantiene la aplicación sana. La versión desplegada y la falla quedan en
+`records/deployments.jsonl`. La caída de PostgreSQL se prueba aparte escalando el StatefulSet
+durante la ventana y restaurándolo después.
 
 Panel visual de Argo (opcional): `kubectl argo rollouts dashboard` → http://localhost:3100
 
@@ -143,6 +147,44 @@ k8s/bluegreen/bg.sh promote
 k8s/bluegreen/bg.sh rollback
 k8s/bluegreen/bg.sh history
 ```
+
+## Fallas controladas (tarea 2)
+
+`bg.sh deploy <versión> --fault <tipo>` activa una falla solo en la nueva versión PREVIEW.
+Valores: `latency`, `slow-query`, `visit-write` y `heap-leak`. Sin `--fault`, la app registra
+`FAULT=none`. `/oups` conserva su excepción intencional y no recibe inyección de fallas.
+
+```bash
+k8s/bluegreen/bg.sh deploy demo-latency --window 2m --fault latency
+k8s/bluegreen/bg.sh deploy demo-query --window 2m --fault slow-query
+k8s/bluegreen/bg.sh deploy demo-visits --window 2m --fault visit-write
+k8s/bluegreen/bg.sh deploy demo-heap --window 2m --fault heap-leak
+```
+
+Mientras corre el análisis, consulta `bg.sh status`, Grafana y los logs del pod PREVIEW.
+`slow-query` ejecuta `pg_sleep(0.5)` dentro de la búsqueda transaccional de dueños. Para esta falla,
+el análisis dirige k6 a `/owners` con 50 solicitudes/s por versión para saturar el pool.
+`visit-write` falla el 30 % de los
+registros válidos. `heap-leak` conserva 1 MiB por solicitud a `/vets.html`. `latency` agrega
+40 % del tiempo de procesamiento de cada solicitud. `FAULT_VISIT_FAILURE_PERCENT` se ajusta
+en el manifiesto.
+
+La caída de PostgreSQL se provoca fuera de la app y requiere un clúster activo:
+
+```bash
+kubectl --context kind-petclinic -n petclinic scale statefulset/petclinic-db --replicas=0
+# Ver errores de conexión en la aplicación
+kubectl --context kind-petclinic -n petclinic scale statefulset/petclinic-db --replicas=1
+```
+
+Comprueba que `/oups` responde con su error esperado y que los errores aparecen en logs,
+sin atribuirlos a una falla inyectada:
+
+```bash
+curl -i http://localhost:8080/oups
+```
+
+Al terminar, `bg.sh abort` descarta PREVIEW; si se promovió, usa `bg.sh rollback`.
 
 Versión defectuosa: agregar `if (true) throw new RuntimeException("bug");` al inicio de
 `VetController.showVetList`, correr `k8s/bluegreen/bg.sh deploy v3-roto` (el análisis la
