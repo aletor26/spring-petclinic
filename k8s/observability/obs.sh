@@ -6,6 +6,7 @@
 #   ./obs.sh down          Desinstala todo y borra el namespace monitoring
 #   ./obs.sh status        Pods de monitoring y objetivos de Prometheus
 #   ./obs.sh dashboards    Vuelve a cargar los dashboards de dashboards/*.json
+#   ./obs.sh rules         Aplica las reglas de alerta de la línea base (rules/*.yaml)
 #   ./obs.sh grafana       Abre Grafana en http://localhost:3000 (admin / admin)
 #   ./obs.sh prometheus    Abre Prometheus en http://localhost:9090
 #   ./obs.sh alertmanager  Abre Alertmanager en http://localhost:9093
@@ -30,6 +31,12 @@ check() {
   need kubectl kubectl
   need helm helm
   kc get ns petclinic >/dev/null 2>&1 || fail "No encuentro el clúster kind-$CLUSTER. Primero: k8s/bluegreen/bg.sh up"
+}
+
+apply_rules() {
+  kc apply -f "$HERE/rules/" >/dev/null
+  log "Reglas de alerta aplicadas: $(ls "$HERE"/rules/*.yaml | xargs -n1 basename | tr '
+' ' ')"
 }
 
 load_dashboards() {
@@ -66,6 +73,7 @@ up() {
   kc apply -f "$HERE/podmonitor.yaml" -f "$HERE/alert-sink.yaml" >/dev/null
   k rollout status deploy/alert-sink --timeout=120s >/dev/null
 
+  apply_rules
   load_dashboards
   log "Listo. Grafana: k8s/observability/obs.sh grafana  →  http://localhost:3000 (admin / admin)"
 }
@@ -100,8 +108,9 @@ case "${1:-}" in
   down)         down ;;
   status)       status ;;
   dashboards)   check; load_dashboards ;;
+  rules)        check; apply_rules ;;
   grafana)      forward kps-grafana 3000 80 Grafana ;;
   prometheus)   forward kps-kube-prometheus-stack-prometheus 9090 9090 Prometheus ;;
   alertmanager) forward kps-kube-prometheus-stack-alertmanager 9093 9093 Alertmanager ;;
-  *) sed -n '2,12p' "$0"; exit 1 ;;
+  *) sed -n '2,13p' "$0"; exit 1 ;;
 esac

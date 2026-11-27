@@ -1,0 +1,28 @@
+# Reglas de alerta de la línea base: sintaxis, lint y pruebas unitarias con promtool.
+# No necesita clúster: usa series sintéticas (k8s/observability/rules/tests/).
+name: Reglas de alerta (promtool)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'feature/**']
+    paths:
+      - 'k8s/observability/rules/**'
+      - 'k8s/observability/baseline/**'
+      - '.github/workflows/alert-rules.yml'
+  pull_request:
+    paths:
+      - 'k8s/observability/rules/**'
+      - 'k8s/observability/baseline/**'
+      - '.github/workflows/alert-rules.yml'
+
+jobs:
+  promtool:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: promtool check + test
+        run: bash k8s/observability/rules/tests/run.sh   # yq viene instalado en ubuntu-latest
+      - name: Script de la línea base (pruebas)
+        run: python3 -m unittest discover -s k8s/observability/baseline -p 'test_*.py' -v
